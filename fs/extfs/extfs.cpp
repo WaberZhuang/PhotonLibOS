@@ -43,6 +43,30 @@ limitations under the License.
 static uint64_t total_read_cnt = 0;
 static uint64_t total_write_cnt = 0;
 
+static int disable_htree_for_lost_found(ext2_filsys fs) {
+    std::string name = "lost+found";
+    errcode_t ret;
+    ext2_ino_t ino;
+    ret = ext2fs_lookup(fs, EXT2_ROOT_INO, name.c_str(), name.length(), 0, &ino);
+    if (ret) {
+        LOG_ERRNO_RETURN(0, -1, "failed to find inode for /lost+found", VALUE(ret));
+    }
+    struct ext2_inode inode;
+    ret = ext2fs_read_inode(fs, ino, &inode);
+    if (ret) {
+        LOG_ERROR_RETURN(0, -1, "failed to read inode for /lost+found", VALUE(ret));
+    }
+    if (inode.i_flags & EXT2_INDEX_FL) {
+        LOG_WARN("/lost+found has htree index, disable it");
+        inode.i_flags &= ~EXT2_INDEX_FL;
+        ret = ext2fs_write_inode(fs, ino, &inode);
+        if (ret) {
+            LOG_ERROR_RETURN(0, -1, "failed to write inode for /lost+found", VALUE(ret));
+        }
+    }
+    return 0;
+}
+
 static ext2_filsys do_ext2fs_open(io_manager extfs_manager) {
     ext2_filsys fs;
     errcode_t ret = ext2fs_open(
@@ -64,6 +88,10 @@ static ext2_filsys do_ext2fs_open(io_manager extfs_manager) {
         LOG_ERRNO_RETURN(0, nullptr, "failed ext2fs_read_bitmaps");
     }
     LOG_INFO("ext2fs opened");
+
+    if (disable_htree_for_lost_found(fs)) {
+        LOG_ERRNO_RETURN(0, nullptr, "failed to disable htree for lost+found");
+    }
     return fs;
 }
 
